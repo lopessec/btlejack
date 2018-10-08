@@ -20,6 +20,7 @@ or simply interact with another user interface.
 from btlejack.jobs import SingleSnifferInterface, MultiSnifferInterface
 from btlejack.session import BtlejackSession, BtlejackSessionError
 from btlejack.packets import *
+from btlejack.link import DeviceError
 
 class Supervisor(object):
     """
@@ -78,10 +79,15 @@ class AccessAddressSniffer(Supervisor):
     access addresses.
     """
 
-    def __init__(self, device=None, baudrate=115200):
+    def __init__(self, devices=None, baudrate=115200):
         super().__init__()
-        if device is not None:
-            self.interface = SingleSnifferInterface(device, baudrate)
+
+        # Pick first device as we don't need more
+        if devices is not None:
+            if len(devices) >= 1:
+                self.interface = SingleSnifferInterface(devices[0], baudrate)
+            else:
+                raise DeviceError('No device provided')
         else:
             self.interface = SingleSnifferInterface()
 
@@ -143,7 +149,7 @@ class ConnectionRecovery(Supervisor):
     STATE_HIJACKED = 7
     STATE_RECOVER_CCHM = 8
 
-    def __init__(self, access_address, channel_map=None, hop_interval=None, crc=None, device=None, baudrate=115200):
+    def __init__(self, access_address, channel_map=None, hop_interval=None, crc=None, devices=None, baudrate=115200, timeout=0):
         super().__init__()
 
         # Retrieve the user session
@@ -153,10 +159,10 @@ class ConnectionRecovery(Supervisor):
             # something went wrong, wont keep the session
             self.session = None
 
-        if device is not None:
-            self.interface = MultiSnifferInterface(3,device, baudrate)
+        if devices is not None:
+            self.interface = MultiSnifferInterface(len(devices), baudrate, devices)
         else:
-            self.interface = MultiSnifferInterface(3)
+            self.interface = MultiSnifferInterface(999)
         self.state = self.STATE_RECOVER_CRC
         self.chm_provided = (channel_map is not None)
         self.crc_provide = (crc is not None)
@@ -168,6 +174,7 @@ class ConnectionRecovery(Supervisor):
         self.crc = crc
         self.cchm_notifications = 0
         self.cchm = 0
+        self.timeout = timeout
 
         # Launch recovery based on the provided informations.
         if self.crc is not None:
@@ -185,7 +192,7 @@ class ConnectionRecovery(Supervisor):
                 self.interface.recover_hop(access_address, self.crc, self.chm)
             else:
                 self.state = self.STATE_RECOVER_CCHM
-                self.interface.recover_chm(access_address, self.crc)
+                self.interface.recover_chm(access_address, self.crc, self.timeout)
         else:
             self.state = self.STATE_RECOVER_CRC
             self.interface.recover_crcinit(access_address)
@@ -213,6 +220,8 @@ class ConnectionRecovery(Supervisor):
         #print(packet)
         if isinstance(packet, VerbosePacket) or isinstance(packet, DebugPacket):
             super().on_packet_received(packet)
+        elif isinstance(packet, ConnectionLostNotification):
+            self.on_connection_lost()
         else:
             if self.state == self.STATE_RECOVER_CRC:
                 if isinstance(packet, CrcNotification):
@@ -249,7 +258,8 @@ class ConnectionRecovery(Supervisor):
                             # and ask for a collaborative channel mapping
                             self.interface.recover_chm(
                                 self.access_address,
-                                self.crc
+                                self.crc,
+                                self.timeout
                             )
                         else:
                             # otherwise, we continue with the 'normal' way
@@ -346,6 +356,12 @@ class ConnectionRecovery(Supervisor):
         """
         pass
 
+    def on_connection_lost(self):
+        """
+        Connection has been lost.
+        """
+        pass
+
     def send_packet(self, packet):
         """
         Send a BLE LL packet.
@@ -367,15 +383,12 @@ class ConnectionSniffer(Supervisor):
     STATE_HIJACKING = 3
     STATE_HIJACKED = 4
 
-    def __init__(self, bd_address='ff:ff:ff:ff:ff:ff'):
+    def __init__(self, bd_address='ff:ff:ff:ff:ff:ff', devices=None):
         super().__init__()
-        self.interface = MultiSnifferInterface(3)
-        self.interface.sniff_connection(
-            bd_address
-        )
-        self.state = self.STATE_SYNCING
-        self.access_address = None
-        self.sent_packet = False
+        self.interface = MultiSnifferInterface(3, devices=devices)
+        self.bd_address = bd_address
+
+        self.sniff()
 
         # Retrieve the user session
         try:
@@ -384,6 +397,17 @@ class ConnectionSniffer(Supervisor):
             # something went wrong, wont keep the session
             self.session = None
 
+
+    def sniff(self):
+        """
+        Start sniffing for new connections.
+        """
+        self.interface.sniff_connection(
+            self.bd_address
+        )
+        self.state = self.STATE_SYNCING
+        self.access_address = None
+        self.sent_packet = False
 
     def jam(self):
         """
@@ -413,6 +437,8 @@ class ConnectionSniffer(Supervisor):
         """
         if isinstance(packet, VerbosePacket) or isinstance(packet, DebugPacket):
             super().on_packet_received(packet)
+        elif isinstance(packet, ConnectionLostNotification):
+            self.on_connection_lost()
         else:
             if self.state == self.STATE_SYNCING:
                 if isinstance(packet, ConnectionRequestNotification):
@@ -480,6 +506,12 @@ class ConnectionSniffer(Supervisor):
     def on_hijacking_failed(self):
         """
         Could not hijack this connection.
+        """
+        pass
+
+    def on_connection_lost(self):
+        """
+        Connection has been lost.
         """
         pass
 

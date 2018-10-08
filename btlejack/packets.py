@@ -95,6 +95,7 @@ class Packet(object):
     N_CONN_REQ = 0x06
     N_PACKET_NORDIC = 0x07
     N_HIJACK_STATUS = 0x08
+    N_CONN_LOST = 0x09
 
     def __init__(self, operation, data, flags):
         """
@@ -404,15 +405,16 @@ class RecoverChmCommand(Packet):
     """
     Recover connection's channel map command.
     """
-    def __init__(self, access_address, crcinit, start, stop):
-        params = pack('<BIBBBBB',
+    def __init__(self, access_address, crcinit, start, stop, timeout=0):
+        params = pack('<BIBBBBBI',
             1, # operation type is CHM recovery
             access_address,
             crcinit & 0xff,
             (crcinit & 0xff00) >> 8,
             (crcinit & 0xff0000) >> 16,
             start,
-            stop
+            stop,
+            timeout
         )
         super().__init__(Packet.OP_RECOVER, params, Packet.F_CMD)
 
@@ -701,6 +703,19 @@ class HijackStatusNotification(Packet):
     @staticmethod
     def from_raw(packet):
         return HijackStatusNotification(packet.data)
+
+@register_packet(Packet.N_CONN_LOST, Packet.F_NOTIFICATION)
+class ConnectionLostNotification(Packet):
+    """
+    Connection lost !
+    """
+
+    def __init__(self):
+        return super().__init__(Packet.N_CONN_LOST, bytes(), Packet.F_NOTIFICATION)
+
+    @staticmethod
+    def from_raw(packet):
+        return ConnectionLostNotification()
 
 @register_packet(Packet.N_CONN_REQ, Packet.F_NOTIFICATION)
 class ConnectionRequestNotification(Packet):

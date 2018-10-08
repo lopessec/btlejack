@@ -6,14 +6,12 @@ from serial import Serial
 from serial.tools.list_ports import comports
 from struct import pack, unpack
 from threading import Lock
-from btlejack.packets import (Packet, PacketRegistry, ResetCommand, VersionCommand,
-    ScanConnectionsCommand, RecoverConnectionCommand, ResetResponse,
-    VersionResponse, ScanConnectionsResponse, AccessAddressNotification,
-    RecoverConnectionResponse, SniffConnReqCommand, SniffConnReqResponse,
+from btlejack.packets import (Packet, PacketRegistry, ResetCommand,
+    VersionCommand, ScanConnectionsCommand, RecoverCrcInitCommand,
+    RecoverResponse, ResetResponse, VersionResponse, ScanConnectionsResponse,
+    AccessAddressNotification, SniffConnReqCommand, SniffConnReqResponse,
     ConnectionRequestNotification, EnableJammingCommand, EnableJammingResponse,
-    EnableHijackingCommand, EnableHijackingResponse, RecoverCrcInitCommand,
-    RecoverResponse)
-
+    EnableHijackingCommand, EnableHijackingResponse)
 
 class DeviceError(Exception):
     """
@@ -39,12 +37,17 @@ class Link(object):
         self.lock = Lock()
 
         # Pick the first serial port that matches a Micro:Bit
+        # if no interface is provided
         if interface is None:
             for port in comports():
-                if port.subsystem == 'usb':
-                    if port.vid == 0x0D28 and port.pid == 0x0204:
-                        interface = port.device
+                if type(port) is tuple:
+                    if "VID:PID=0d28:0204" in port[-1]:
+                        interface = port[0]
                         break
+                elif port.vid == 0x0D28 and port.pid == 0x0204:
+                    interface = port.device
+                    break
+
         # If no interface found, we cannot do anything as we need at least
         # one Micro:bit device connected.
         if interface is None:
@@ -183,7 +186,7 @@ class Link(object):
             if isinstance(pkt, AccessAddressNotification):
                 yield pkt
         """
-        
+
     def recover_connection(self, access_address, channel_map=None, hop_interval=None):
         """
         Recover an existing connection.

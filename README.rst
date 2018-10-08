@@ -1,9 +1,17 @@
 BtleJack: a new Bluetooth Low Energy swiss-army knife
 #####################################################
 
-Btlejack provides everything you need to sniff, jam and hijack Bluetooth Low Energy devices. It relies on one or more [BBC Micro:Bit](http://microbit.org/) devices running a dedicated firmware.
+Btlejack provides everything you need to sniff, jam and hijack Bluetooth Low Energy devices. It relies on one or more `BBC Micro:Bit <http://microbit.org/>`_. devices running a dedicated firmware. You may also
+want to use an `Adafruit's Bluefruit LE sniffer <https://www.adafruit.com/product/2269>`_ or a `nRF51822 Eval Kit <https://www.waveshare.com/wiki/BLE400>`_, as we added support for these devices.
 
 **This tool only supports Bluetooth Low Energy 4.x.**
+
+Requirements
+============
+
+You need a UNIX based system (for example a Raspberry Pi). If you use the BBC Micro:Bit, you will need one to three Micro:Bit devices (three devices recommended) and for each device one free USB port. The power consumption of a Micro:Bit is rather low, so you can use a single USB port and a passive hub for powering the three recommended units.
+
+**If you connect 3 microbits at the same time on your computer, Btlejack will be able to sniff on every advertising channel and has far more chance to capture the connection request.**
 
 How to install
 ==============
@@ -15,28 +23,48 @@ First, install the ``btlejack`` Python3 client software with Pip:
   $ sudo pip3 install btlejack
 
 
-Then, connect your Micro:Bit device to your computer with a USB cable, mount the associated mass storage device, and issue the following command:
+Then, connect your Micro:Bit device to your computer with a USB cable, mount the associated mass storage device (the mount point must contain **MICROBIT**), and issue the following command:
 
 ::
 
   $ btlejack -i
 
-
 This will program every Micro:Bit device connected to your computer, and make
 them ready to use with Btlejack. It will use the correct firmware version for the current client software, so it is highly recommended to perform this firmware installation procedure each time you update Btlejack.
 
-Keep your microbits connected and you're all set !
+If you are using a *Bluefruit LE sniffer* or a *nRF51822 Eval Kit*, then please use an external SWD programmer to flash your device with `this firmware <https://github.com/virtualabs/btlejack-firmware/raw/master/dist/btlejack-firmware-ble400.hex>`_.
+
+Keep your devices connected and you're all set !
+
+**NOTE** This only works with posix compatible systems.
 
 How to use Btlejack
 ===================
 
 Using Btlejack is quite easy. Btlejack can:
 
+- use various devices
 - sniff an existing BLE connection
 - sniff new BLE connections
 - jam an existing BLE connection
 - hijack an existing BLE connection
 - export captured packets to various PCAP formats
+
+
+Specify devices to use
+----------------------
+
+Btlejack normally tries to autodetect and use connected compatible devices (Micro:Bit only for the moment), but since the firmware can be hacked or modified
+to work with other nRF51822-based boards, it provides a specific options to allow compatibility with these devices.
+
+The ``-d`` option lets you specify one or more devices with Btlejack. Note that this option will disable the automatic detection of devices, and you should
+add as many devices as you may need:
+
+::
+
+  $ btlejack -d /dev/ttyACM0 -d /dev/ttyACM2 -s
+
+
 
 Sniffing an existing connection
 -------------------------------
@@ -49,8 +77,8 @@ First, find an existing connection to target with ``btlejack``:
   BtleJack version 1.1
 
   [i] Enumerating existing connections ...
-  [ - 54 dBm] 0xcd91d517 | pkts: 1
-  [ - 46 dBm] 0xcd91d517 | pkts: 2
+  [ - 54 dBm] 0xcd91d517 | pkts: 1
+  [ - 46 dBm] 0xcd91d517 | pkts: 2
 
 The first value (in dBm) shows the power of the signal, the greater this value is the better the sniffed connection will be.
 
@@ -115,8 +143,6 @@ or you may also want to specify the target BD address:
 
   $ btlejack -c 03:e1:f0:00:11:22
 
-
-**If you connect at least 3 microbits at the same time on your computer, Btlejack will be able to sniff on every advertising channels and has far more chance to capture the connection request.**
 
 Jamming a connection
 --------------------
@@ -255,3 +281,17 @@ You may also need to tell crackle to use a specific cracking strategy, by using 
 ::
 
   $ crackle -i some.pcap -s 1
+
+
+Connection cache
+----------------
+
+Btlejack uses a *connection cache* to store some connection-related value in order to speed up
+things a bit. This connection cache may cause some problems, especially if an access address has
+been previously seen.
+
+This cache can be flushed with the ``-z`` option:
+
+::
+
+  $ btlejack -z

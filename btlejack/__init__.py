@@ -19,7 +19,9 @@ from subprocess import check_output
 from argparse import ArgumentParser
 
 from btlejack.pcap import PcapBleWriter, PcapNordicTapWriter,  PcapBlePHDRWriter
-from btlejack.ui import CLIAccessAddressSniffer, CLIConnectionRecovery, CLIConnectionSniffer, ForcedTermination
+from btlejack.ui import (CLIAccessAddressSniffer, CLIConnectionRecovery,
+                         CLIConnectionSniffer, ForcedTermination,
+                         SnifferUpgradeRequired)
 from btlejack.helpers import *
 from btlejack.link import DeviceError
 from btlejack.version import VERSION
@@ -50,7 +52,8 @@ def main():
     parser.add_argument(
         '-d',
         '--device',
-        dest='device',
+        dest='devices',
+        action='append',
         type=str,
         help='Micro:Bit device serial port'
     )
@@ -165,6 +168,15 @@ def main():
         help='Install latest version of firmware on every sniffer'
     )
 
+    parser.add_argument(
+        '-n',
+        '--timeout',
+        dest='timeout',
+        default=0,
+        type=int,
+        help='Channel map recovery timeout'
+    )
+
     args = parser.parse_args()
     supervisor = None
 
@@ -225,7 +237,7 @@ def main():
 
     if args.scan_aa:
         try:
-            supervisor = CLIAccessAddressSniffer(verbose=args.verbose)
+            supervisor = CLIAccessAddressSniffer(verbose=args.verbose, devices=args.devices)
         except DeviceError as error:
             print('[!] Please connect a compatible Micro:Bit in order to use BtleJack')
             sys.exit(-1)
@@ -257,16 +269,22 @@ def main():
                 ).strftime('%Y-%m-%d %H:%M:%S')
                 print('[i] Using cached parameters (created on %s)' % creation_date)
 
-            supervisor = CLIConnectionRecovery(
-                aa,
-                channel_map=chm,
-                hijack=args.hijack,
-                jamming=args.jamming,
-                hop_interval=hop,
-                crc=crc,
-                output=output,
-                verbose=args.verbose
-            )
+            try:
+                supervisor = CLIConnectionRecovery(
+                    aa,
+                    channel_map=chm,
+                    hijack=args.hijack,
+                    jamming=args.jamming,
+                    hop_interval=hop,
+                    crc=crc,
+                    output=output,
+                    verbose=args.verbose,
+                    devices=args.devices,
+                    timeout=args.timeout
+                )
+            except SnifferUpgradeRequired as su:
+                print("[i] Quitting, please upgrade your sniffer firmware (-i option if you are using a Micro:Bit)")
+
         except DeviceError as error:
             print('[!] Please connect a compatible Micro:Bit in order to use BtleJack')
             sys.exit(-1)
@@ -278,11 +296,15 @@ def main():
         bd_addr_int = bd_address_to_int(args.connreq)
         if bd_addr_int is not None:
             # address is okay, feed our sniffer
-            supervisor = CLIConnectionSniffer(
-                bd_addr_int,
-                output=output,
-                verbose=args.verbose
-            )
+            try:
+                supervisor = CLIConnectionSniffer(
+                    bd_addr_int,
+                    output=output,
+                    verbose=args.verbose,
+                    devices=args.devices
+                )
+            except SnifferUpgradeRequired as su:
+                print("[i] Quitting, please upgrade your sniffer firmware (-i option if you are using a Micro:Bit)")
         else:
             print('[!] Wrong Bluetooth Address format: %s' % args.connreq)
     elif not args.flush and not args.install:
@@ -301,7 +323,6 @@ def main():
             raise ForcedTermination()
 
         signal.signal(signal.SIGINT, ctrlc_handler)
-
 
         if supervisor is not None:
             while True:

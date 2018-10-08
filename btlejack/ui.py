@@ -315,6 +315,9 @@ class PromptThread(Thread):
             else:
                 sys.stdout.write('\nCommand not found\n')
 
+    def cancel(self):
+        self.canceled = True
+
     def run(self):
         while not self.canceled:
             self.prompt()
@@ -322,8 +325,8 @@ class PromptThread(Thread):
 
 class CLIAccessAddressSniffer(AccessAddressSniffer):
 
-    def __init__(self, output=None, verbose=None):
-        super().__init__()
+    def __init__(self, devices=None, output=None, verbose=None):
+        super().__init__(devices=devices)
         self.output = output
         self.verbose = verbose
 
@@ -359,8 +362,8 @@ class CLIConnectionSniffer(ConnectionSniffer):
     """
     New connection sniffer.
     """
-    def __init__(self, bd_address='ff:ff:ff:ff:ff:ff', output=None, verbose=False):
-        super().__init__(bd_address)
+    def __init__(self, bd_address='ff:ff:ff:ff:ff:ff', devices=None, output=None, verbose=False, timeout=0):
+        super().__init__(bd_address, devices=devices)
         self.verbose = verbose
         self.output = output
 
@@ -369,7 +372,7 @@ class CLIConnectionSniffer(ConnectionSniffer):
         print('[i] Detected sniffers:')
         for i, version in enumerate(versions):
             print(' > Sniffer #%d: version %d.%d' % (i, version[0], version[1]))
-            if major != version[0] and minor != version[1]:
+            if (major == version[0] and (minor > version[1])) or (major > version[0]):
                 print(' -!!!- You must update the firmware of this sniffer -!!!-')
                 raise SnifferUpgradeRequired()
 
@@ -430,20 +433,28 @@ class CLIConnectionSniffer(ConnectionSniffer):
         if self.verbose:
             print('> '+ str(packet.message))
 
+    def on_connection_lost(self):
+        """
+        Connection lost.
+        """
+        print('[!] Connection lost, sniffing again...')
+        self.sniff()
+
 
 class CLIConnectionRecovery(ConnectionRecovery):
     """
     CLI Connection recovery class.
     """
 
-    def __init__(self, access_address, channel_map=None, crc=None, hop_interval=None, device=None, baudrate=115200, hijack=False, jamming=False, output=None, debug=False, verbose=False):
+    def __init__(self, access_address, channel_map=None, crc=None, hop_interval=None, devices=None, baudrate=115200, hijack=False, jamming=False, output=None, debug=False, verbose=False, timeout=0):
         super().__init__(
             access_address,
             channel_map=channel_map,
             crc=crc,
             hop_interval=hop_interval,
-            device=device,
-            baudrate=baudrate
+            devices=devices,
+            baudrate=baudrate,
+            timeout=timeout
         )
         self.output = output
         self.debug = debug
@@ -459,7 +470,7 @@ class CLIConnectionRecovery(ConnectionRecovery):
         print('[i] Detected sniffers:')
         for i, version in enumerate(versions):
             print(' > Sniffer #%d: fw version %d.%d' % (i, version[0], version[1]))
-            if major != version[0] and minor != version[1]:
+            if (major == version[0] and (minor > version[1])) or (major > version[0]):
                 print(' -!!!- You must update the firmware of this sniffer -!!!-')
                 raise SnifferUpgradeRequired()
 
@@ -496,10 +507,10 @@ class CLIConnectionRecovery(ConnectionRecovery):
         Connection CRC has been recovered.
         """
         self.crc = crc
-        self.spinner.stop_and_persist({
-            'symbol':'✓'.encode('utf-8'),
-            'text':'CRCInit = 0x%06x'%crc
-        })
+        self.spinner.stop_and_persist(
+            symbol='✓'.encode('utf-8'),
+            text='CRCInit = 0x%06x'%crc
+        )
         if self.chm_provided:
             print('✓ Channel map is provided: 0x%010x' % self.chm)
             self.spinner.text = 'Computing hop interval'
@@ -514,10 +525,10 @@ class CLIConnectionRecovery(ConnectionRecovery):
         Channel map has been recovered.
         """
         self.chm = chm
-        self.spinner.stop_and_persist({
-            'symbol':'✓'.encode('utf-8'),
-            'text':'Channel Map = 0x%010x'%chm
-        })
+        self.spinner.stop_and_persist(
+            symbol='✓'.encode('utf-8'),
+            text='Channel Map = 0x%010x'%chm
+        )
         if self.hop_provided:
             print('✓ Hop interval is provided: %d' % self.hop_interval)
             self.spinner.text = 'Computing hop increment'
@@ -531,10 +542,10 @@ class CLIConnectionRecovery(ConnectionRecovery):
         """
         Hop interval has been recovered.
         """
-        self.spinner.stop_and_persist({
-            'symbol':'✓'.encode('utf-8'),
-            'text':'Hop interval = %d'%interval
-        })
+        self.spinner.stop_and_persist(
+            symbol='✓'.encode('utf-8'),
+            text='Hop interval = %d'%interval
+        )
         self.spinner.text = 'Computing hop increment'
         self.spinner.start()
 
@@ -542,10 +553,10 @@ class CLIConnectionRecovery(ConnectionRecovery):
         """
         Hop increment has been recovered.
         """
-        self.spinner.stop_and_persist({
-            'symbol':'✓'.encode('utf-8'),
-            'text':'Hop increment = %d'%increment
-        })
+        self.spinner.stop_and_persist(
+            symbol='✓'.encode('utf-8'),
+            text='Hop increment = %d'%increment
+        )
         if self._hijack:
             print('[i] Synchronized, hijacking in progress ...')
             self.hijack()
@@ -589,4 +600,26 @@ class CLIConnectionRecovery(ConnectionRecovery):
         """
         Hijack terminated callback
         """
+        #raise ForcedTermination()
+
+    def on_packet_received(self, packet):
+        if self._pt is not None and self._pt.canceled:
+            self._pt.join()
+            raise ForcedTermination()
+        else:
+            super().on_packet_received(packet)
+
+
+    def on_connection_lost(self):
+        """
+        Connection lost.
+        """
+        # if we were hijacking, close PromptThread
+        if self._pt is not None:
+            # Kill prompt thread and wait for its termination.
+            self._pt.cancel()
+            self._pt.join()
+
+        # Okay, we exit here.
+        print('[!] Connection lost.')
         raise ForcedTermination()
